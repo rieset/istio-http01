@@ -1,0 +1,185 @@
+# Пример Pod'а, создаваемого cert-manager для HTTP01 challenge
+# Этот файл демонстрирует структуру Pod'а, который создается cert-manager
+# для обработки HTTP01 challenge от Let's Encrypt
+
+apiVersion: v1
+kind: Pod
+metadata:
+  # Имя пода генерируется автоматически с префиксом cm-acme-http-solver-
+  name: cm-acme-http-solver-abc123
+  generateName: cm-acme-http-solver-  # Префикс для генерации уникального имени
+  
+  namespace: istio-system  # Namespace, где создается под
+  
+  # Уникальный идентификатор пода в кластере
+  uid: 602b9f98-8fd5-44d2-801d-3bca2a4b1728
+  
+  # Версия ресурса (изменяется при каждом обновлении)
+  resourceVersion: '6973082'
+  
+  generation: 1
+  creationTimestamp: '2026-01-06T02:35:18Z'
+  
+  # ВАЖНО: Метки, используемые для идентификации HTTP01 solver подов
+  labels:
+    # Идентификатор домена для challenge
+    acme.cert-manager.io/http-domain: '2377976252'
+    # Токен для challenge
+    acme.cert-manager.io/http-token: '1216941876'
+    # Маркер, указывающий что это HTTP01 solver под
+    acme.cert-manager.io/http01-solver: 'true'
+  
+  annotations:
+    # Разрешает eviction для autoscaler
+    cluster-autoscaler.kubernetes.io/safe-to-evict: 'true'
+    
+    # Статус CNI сети (Cilium в данном случае)
+    k8s.v1.cni.cncf.io/network-status: |-
+      [{
+          "name": "cilium",
+          "interface": "eth0",
+          "ips": ["10.233.69.47"],
+          "mac": "de:81:52:fa:97:19",
+          "default": true,
+          "dns": {},
+          "gateway": ["10.233.69.143"]
+      }]
+    
+    # Отключает автоматическую инъекцию Istio sidecar
+    sidecar.istio.io/inject: 'false'
+  
+  # ВАЖНО: Связь с Challenge ресурсом cert-manager
+  ownerReferences:
+    - apiVersion: acme.cert-manager.io/v1
+      kind: Challenge  # Тип родительского ресурса
+      name: gateway-cert-alpha-1-3158359770-2599759281
+      uid: 6d6aeea6-6db6-40ec-85af-31e0337dff46
+      controller: true  # cert-manager является контроллером этого пода
+      blockOwnerDeletion: true  # Под не может быть удален пока существует Challenge
+
+status:
+  # Текущая фаза пода
+  phase: Running
+  
+  # Условия состояния пода
+  conditions:
+    - type: PodReadyToStartContainers
+      status: 'True'
+      lastTransitionTime: '2026-01-06T02:35:21Z'
+    - type: Initialized
+      status: 'True'
+      lastTransitionTime: '2026-01-06T02:35:18Z'
+    - type: Ready  # ВАЖНО: Проверка готовности пода к обработке запросов
+      status: 'True'
+      lastTransitionTime: '2026-01-06T02:35:21Z'
+    - type: ContainersReady
+      status: 'True'
+      lastTransitionTime: '2026-01-06T02:35:21Z'
+    - type: PodScheduled
+      status: 'True'
+      lastTransitionTime: '2026-01-06T02:35:18Z'
+  
+  # IP адреса
+  hostIP: 10.20.51.123  # IP ноды, на которой запущен под
+  podIP: 10.233.69.47   # IP адрес пода в кластере
+  
+  startTime: '2026-01-06T02:35:18Z'
+  
+  # Статус контейнеров
+  containerStatuses:
+    - name: acmesolver
+      state:
+        running:
+          startedAt: '2026-01-06T02:35:20Z'
+      ready: true  # ВАЖНО: Контейнер готов обрабатывать запросы
+      restartCount: 0
+      image: quay.io/jetstack/cert-manager-acmesolver:v1.19.1
+      imageID: >-
+        quay.io/jetstack/cert-manager-acmesolver@sha256:35ed1103cb49a3e1fc2438de84f304e3fbdeb53e0366f6b1bc2ec9b2e57462db
+      containerID: >-
+        containerd://33b4e9e2ba77aa2f150d2110645b8ee405a7090e16e928e9c34307dc193da007
+      started: true
+      allocatedResources:
+        cpu: 10m
+        memory: 64Mi
+      resources:
+        limits:
+          cpu: 100m
+          memory: 64Mi
+        requests:
+          cpu: 10m
+          memory: 64Mi
+  
+  qosClass: Burstable  # Класс качества обслуживания
+
+spec:
+  containers:
+    - name: acmesolver
+      # Официальный образ cert-manager для HTTP01 solver
+      image: quay.io/jetstack/cert-manager-acmesolver:v1.19.1
+      
+      # ВАЖНО: Аргументы запуска контейнера
+      args:
+        - '--listen-port=8089'  # Порт, на котором слушает HTTP сервер
+        - '--domain=app.example.com'  # Домен для валидации
+        - '--token=UiXCAkqSyCLNsMaWc5POhWknQi1o9FEjKixVVxkyv0k'  # Токен challenge
+        - '--key=UiXCAkqSyCLNsMaWc5POhWknQi1o9FEjKixVVxkyv0k.fAT4-5uDBXS3vaAIIYBE6H55p_WljmUD3LAk5eHA2Dk'  # Ключ для ответа
+      
+      ports:
+        - name: http
+          containerPort: 8089  # Порт контейнера для HTTP запросов
+          protocol: TCP
+      
+      resources:
+        limits:
+          cpu: 100m
+          memory: 64Mi
+        requests:
+          cpu: 10m
+          memory: 64Mi
+      
+      terminationMessagePath: /dev/termination-log
+      terminationMessagePolicy: File
+      imagePullPolicy: IfNotPresent
+      
+      # ВАЖНО: Настройки безопасности контейнера
+      securityContext:
+        capabilities:
+          drop:
+            - ALL  # Удаление всех capabilities для безопасности
+        readOnlyRootFilesystem: true  # Только для чтения root файловая система
+        allowPrivilegeEscalation: false  # Запрет повышения привилегий
+  
+  restartPolicy: OnFailure  # Перезапуск только при ошибке
+  terminationGracePeriodSeconds: 30
+  dnsPolicy: ClusterFirst
+  nodeSelector:
+    kubernetes.io/os: linux  # Только Linux ноды
+  serviceAccountName: default
+  serviceAccount: default
+  automountServiceAccountToken: false  # Не монтировать service account token
+  nodeName: example-node-1  # Конкретная нода, на которой запущен под
+  
+  # ВАЖНО: Настройки безопасности пода
+  securityContext:
+    runAsNonRoot: true  # Запуск от непривилегированного пользователя
+    seccompProfile:
+      type: RuntimeDefault  # Использование дефолтного seccomp профиля
+  
+  schedulerName: default-scheduler
+  
+  # Толерации для работы на нодах с проблемами
+  tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+    - key: node.kubernetes.io/unreachable
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+  
+  priority: 0
+  enableServiceLinks: false
+  preemptionPolicy: PreemptLowerPriority
+

@@ -1,0 +1,185 @@
+name: Build and Package Helm Chart
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Триггер на теги вида v1.0.0, v0.1.0 и т.д.
+  workflow_dispatch:
+    inputs:
+      chart_version:
+        description: 'Chart version (e.g., 0.1.0)'
+        required: true
+        type: string
+      app_version:
+        description: 'App version (e.g., 0.1.0)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  build-helm-chart:
+    name: Build and Package Helm Chart
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Нужно для создания релизов
+      packages: write  # Нужно для публикации в GitHub Packages
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Extract version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: tag_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version extracted: $VERSION"
+
+      - name: Set chart version
+        id: chart_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            CHART_VERSION="${{ github.event.inputs.chart_version }}"
+            if [ -n "${{ github.event.inputs.app_version }}" ]; then
+              APP_VERSION="${{ github.event.inputs.app_version }}"
+            else
+              APP_VERSION="$CHART_VERSION"
+            fi
+          elif [ -n "${{ steps.tag_version.outputs.version }}" ]; then
+            CHART_VERSION="${{ steps.tag_version.outputs.version }}"
+            APP_VERSION="${{ steps.tag_version.outputs.version }}"
+          else
+            CHART_VERSION="0.0.0-dev"
+            APP_VERSION="latest"
+          fi
+          echo "chart_version=$CHART_VERSION" >> $GITHUB_OUTPUT
+          echo "app_version=$APP_VERSION" >> $GITHUB_OUTPUT
+          echo "Chart version: $CHART_VERSION"
+          echo "App version: $APP_VERSION"
+          
+          # Set OCI registry URL for GitHub Packages
+          OCI_REGISTRY="ghcr.io/${{ github.repository_owner }}/helm-charts"
+          CHART_NAME="istio-http01"
+          OCI_REF="${OCI_REGISTRY}/${CHART_NAME}:${CHART_VERSION}"
+          echo "oci_registry=$OCI_REGISTRY" >> $GITHUB_OUTPUT
+          echo "chart_name=$CHART_NAME" >> $GITHUB_OUTPUT
+          echo "oci_ref=$OCI_REF" >> $GITHUB_OUTPUT
+          echo "OCI registry: $OCI_REGISTRY"
+          echo "Chart OCI reference: $OCI_REF"
+
+      - name: Update Chart.yaml with version
+        run: |
+          CHART_VERSION="${{ steps.chart_version.outputs.chart_version }}"
+          APP_VERSION="${{ steps.chart_version.outputs.app_version }}"
+          
+          # Update Chart.yaml
+          sed -i "s/^version: .*/version: $CHART_VERSION/" helm/istio-http01/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"$APP_VERSION\"/" helm/istio-http01/Chart.yaml
+          
+          echo "Updated Chart.yaml:"
+          cat helm/istio-http01/Chart.yaml
+
+      - name: Lint Helm chart
+        run: |
+          helm lint helm/istio-http01
+
+      - name: Package Helm chart
+        run: |
+          mkdir -p dist
+          helm package helm/istio-http01 -d dist/
+          echo "✅ Helm chart packaged successfully!"
+
+      - name: List packaged charts
+        run: |
+          echo "📦 Packaged charts:"
+          ls -lh dist/*.tgz || echo "No charts found"
+
+      - name: Upload chart artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: dist/*.tgz
+          retention-days: 30
+
+      - name: Create GitHub Release (if tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/*.tgz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Save chart to OCI registry
+        run: |
+          CHART_VERSION="${{ steps.chart_version.outputs.chart_version }}"
+          OCI_REF="${{ steps.chart_version.outputs.oci_ref }}"
+          CHART_FILE="dist/istio-http01-${CHART_VERSION}.tgz"
+          
+          if [ ! -f "$CHART_FILE" ]; then
+            echo "❌ Error: Chart file not found: $CHART_FILE"
+            exit 1
+          fi
+          
+          echo "📦 Saving chart to OCI registry: $OCI_REF"
+          echo "Chart file: $CHART_FILE"
+          
+          # Save chart to OCI registry
+          helm push "$CHART_FILE" oci://${{ steps.chart_version.outputs.oci_registry }}
+          
+          echo "✅ Chart saved to OCI registry: $OCI_REF"
+
+      - name: Verify chart availability
+        run: |
+          OCI_REF="${{ steps.chart_version.outputs.oci_ref }}"
+          CHART_NAME="${{ steps.chart_version.outputs.chart_name }}"
+          CHART_VERSION="${{ steps.chart_version.outputs.chart_version }}"
+          
+          echo "🔍 Verifying chart availability..."
+          
+          # Wait a bit for registry to process
+          sleep 5
+          
+          # Try to pull chart metadata
+          if helm show chart oci://${{ steps.chart_version.outputs.oci_registry }}/$CHART_NAME --version $CHART_VERSION > /dev/null 2>&1; then
+            echo "✅ Chart is available in OCI registry!"
+            echo "📋 Chart information:"
+            helm show chart oci://${{ steps.chart_version.outputs.oci_registry }}/$CHART_NAME --version $CHART_VERSION
+            echo ""
+            echo "📦 Chart can be installed with:"
+            echo "   helm install istio-http01 oci://${{ steps.chart_version.outputs.oci_registry }}/$CHART_NAME --version $CHART_VERSION"
+          else
+            echo "❌ Chart is not yet available in OCI registry"
+            echo "⏳ This might be a timing issue. Please check manually:"
+            echo "   helm show chart oci://${{ steps.chart_version.outputs.oci_registry }}/$CHART_NAME --version $CHART_VERSION"
+            exit 1
+          fi
+
+      - name: Output chart information
+        run: |
+          echo "✅ Helm chart built, packaged and published successfully!"
+          echo "Chart version: ${{ steps.chart_version.outputs.chart_version }}"
+          echo "App version: ${{ steps.chart_version.outputs.app_version }}"
+          echo "OCI registry: ${{ steps.chart_version.outputs.oci_registry }}"
+          echo "Chart OCI reference: ${{ steps.chart_version.outputs.oci_ref }}"
+          echo ""
+          echo "📦 Chart files:"
+          ls -lh dist/*.tgz || echo "No charts found"
+          echo ""
+          echo "🔗 Chart can be installed from GitHub Packages:"
+          echo "   helm install istio-http01 oci://${{ steps.chart_version.outputs.oci_registry }}/${{ steps.chart_version.outputs.chart_name }} --version ${{ steps.chart_version.outputs.chart_version }}"
+

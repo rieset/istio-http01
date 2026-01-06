@@ -1,0 +1,63 @@
+# Default values for istio-http01
+replicaCount: 1
+
+image:
+  repository: rieset/istio-http01
+  pullPolicy: Always
+  tag: "0.1.0"
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+
+resources:
+  limits:
+    cpu: 50m
+    memory: 64Mi
+  requests:
+    cpu: 10m
+    memory: 32Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Leader election
+leaderElection:
+  enabled: true
+
+# Health probes
+health:
+  enabled: true
+  port: 8081
+
+# Metrics
+metrics:
+  enabled: true
+  port: 8080
+  secure: true
+
+# Watch namespace - empty means watch all namespaces for Gateway
+# For Certificate, Issuer and Pods - always watches own namespace
+watchNamespace: ""
+

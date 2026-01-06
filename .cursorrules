@@ -1,0 +1,224 @@
+# Cursor Rules for Istio Gas Operator
+
+## Project Overview
+This is a Kubernetes operator built with Operator SDK that monitors cert-manager pods created for Let's Encrypt domain validation using HTTP01 challenge method.
+
+## Technology Stack
+- **Language**: Go (latest stable version)
+- **Framework**: Operator SDK (https://sdk.operatorframework.io/)
+- **Target**: Kubernetes Operator for monitoring cert-manager HTTP01 challenge pods
+
+## Code Style and Best Practices
+
+### Go Conventions
+- Follow standard Go formatting (`gofmt`)
+- Use `golangci-lint` for code quality
+- Prefer explicit error handling
+- Use context.Context for cancellation and timeouts
+- Follow Go naming conventions (exported/unexported)
+- Write comprehensive unit tests
+
+### Code Quality and Linting
+- **CRITICAL: Always run `golangci-lint` before submitting code changes**
+- The project uses `golangci-lint` version `v2.1.0` (same as GitHub Actions workflow)
+- Configuration file: `.golangci.yml`
+- Run linting locally: `make lint` or `make lint-fix` (auto-fixes issues)
+- **Before making any code changes, check existing lint errors: `make lint`**
+- **After making code changes, ALWAYS verify with: `make lint`**
+- Fix all linting errors before committing code
+- The linter configuration matches the GitHub Actions workflow (`.github/workflows/lint.yml`)
+- Enabled linters: copyloopvar, dupl, errcheck, ginkgolinter, goconst, gocyclo, govet, ineffassign, lll, misspell, nakedret, prealloc, revive, staticcheck, unconvert, unparam, unused
+- Formatters: gofmt, goimports
+
+### Operator SDK Guidelines
+- Use controller-runtime patterns
+- Implement proper reconciliation loops
+- Handle resource ownership correctly
+- Use finalizers for cleanup
+- Follow Kubernetes API conventions
+- Document all CRDs thoroughly
+
+### Code Organization
+- **CRITICAL: Files must be less than 250 lines. If a file exceeds this limit, refactoring is REQUIRED**
+- Keep controllers focused and single-purpose
+- Separate business logic from Kubernetes API interactions
+- Use interfaces for testability
+- Document all exported functions and types
+- Index functions in code files for easy navigation
+- Split large files into smaller, focused modules when approaching the limit
+
+### Documentation Requirements
+- All exported functions must have Go doc comments
+- Complex logic should include inline comments
+- Update glossary (docs/glossary.md) when introducing new terms
+- Keep README.md up to date with project status
+- **CRITICAL: Never use real domain names or company names in documentation (MD files)**
+  - Use example domains: `example.com`, `app.example.com`, `*.example.com`
+  - Use example namespaces: `example-namespace`, `example-gateway-ns`
+  - Use example resource names: `example-gateway`, `example-service`
+  - Use example registry names: `example-registry` instead of real registries
+  - Use example node names: `example-node-1` instead of real node names
+
+### Testing
+- Write unit tests for all business logic
+- Use envtest for controller testing
+- Mock external dependencies
+- Aim for >80% code coverage
+
+### Error Handling
+- Always handle errors explicitly
+- Provide context in error messages
+- Log errors at appropriate levels
+- Return meaningful error messages
+
+## File Structure
+```
+/
+├── .cursorrules          # This file
+├── README.md             # Project overview
+├── docs/                 # Documentation
+│   ├── glossary.md       # Terms and definitions
+│   ├── best-practices.md # Go best practices
+│   └── modules.md       # Module documentation
+├── config/               # Kustomize configs
+├── api/                  # API definitions
+├── controllers/          # Controller implementations
+└── main.go              # Entry point
+```
+
+## Development Workflow
+1. Always check glossary before introducing new terms
+2. Update documentation when adding features
+3. Index functions in code files
+4. **CRITICAL: Monitor file size - files exceeding 250 lines MUST be refactored immediately**
+5. Follow semantic versioning
+6. Write tests before implementing features (TDD preferred)
+7. **CRITICAL: Run `make lint` before and after making code changes to ensure code quality**
+8. Fix all linting errors before committing code
+
+## Kubernetes Specific
+- Use client-go for Kubernetes API interactions
+- Follow Kubernetes resource naming conventions
+- Implement proper RBAC permissions
+- Use structured logging (klog or similar)
+- Handle resource versioning correctly
+
+## Logging Best Practices
+
+### Log Levels
+Use appropriate log levels for different types of events:
+
+- **ERROR** - Critical errors that require immediate attention
+  - Use for: API call failures, resource creation/update failures, unrecoverable errors
+  - Always include error object: `logger.Error(err, "message", ...)`
+  - Example: `logger.Error(err, "failed to create VirtualService", "domain", domain)`
+
+- **WARN** - Warning conditions that may need attention but don't stop execution
+  - Use for: Deprecated features, configuration issues, recoverable errors, unexpected but handled conditions
+  - Note: controller-runtime uses `Info` level for warnings, prefix message with "WARNING:" or use appropriate context
+  - Example: `logger.Info("WARNING: Using deprecated configuration", "field", fieldName)`
+
+- **INFO** - Important events and informational messages
+  - Use for: Resource detection, successful operations, state changes
+  - Example: `logger.Info("HTTP01 Solver Pod detected", "pod", pod.Name)`
+
+- **DEBUG** - Detailed diagnostic information for debugging
+  - Use for: Step-by-step execution flow, intermediate values, detailed state
+  - Enable with: `--zap-log-level=debug`
+  - Example: `logger.V(1).Info("Processing step", "step", stepName)`
+
+### Logging Guidelines
+
+1. **Use structured logging with key-value pairs**
+   ```go
+   logger.Info("Resource created",
+       "resource", resource.Name,
+       "namespace", resource.Namespace,
+       "domain", domain,
+   )
+   ```
+
+2. **Avoid redundant information**
+   - Don't log fields that are automatically added by controller-runtime
+   - Use context loggers to avoid repeating common fields
+   - Example: `logger = logger.WithValues("pod", pod.Name, "namespace", pod.Namespace)`
+
+3. **Include contextual information**
+   - Always include: resource names, namespaces, domains, hosts
+   - For errors: include all relevant context that helps debugging
+   - Example: `logger.Error(err, "failed to process", "pod", pod.Name, "domain", domain)`
+
+4. **Use standard field names for consistency**
+   - Resource fields: `name`, `namespace`, `podName`, `podNamespace`, `gatewayName`, `gatewayNamespace`
+   - Network fields: `host`, `domain`, `path`, `uri`, `destinationHost`, `destinationPort`
+   - HTTP01 Solver fields: `domain`, `solverPod`, `solverService`, `solverPort`
+
+5. **Minimize log volume**
+   - Don't log every iteration in loops (use DEBUG level if needed)
+   - Log only important state changes and errors
+   - Aggregate information when possible (e.g., count instead of individual items)
+
+6. **Never log sensitive data**
+   - Never log: passwords, tokens, private keys, certificates
+   - Mask or omit sensitive fields in logs
+
+7. **Use appropriate loggers**
+   - `log.FromContext(ctx)` - for controller reconciliation (includes automatic fields)
+   - `ctrl.Log` - for global logging without automatic controller-runtime fields
+   - Context loggers - to add common fields once: `logger.WithValues(...)`
+
+### Log Level Selection Guide
+
+- **ERROR**: Something went wrong and needs attention
+  - Action required: Investigate and fix
+  - Examples: API failures, resource creation failures, validation errors
+  
+- **WARN**: Something unusual happened but execution continues
+  - Action: Monitor and consider fixing
+  - Examples: Deprecated API usage, configuration warnings, recoverable errors
+  
+- **INFO**: Normal operation, important state changes
+  - Action: Normal monitoring
+  - Examples: Resource detected, successful operations, state transitions
+  
+- **DEBUG**: Detailed information for troubleshooting (disabled by default)
+  - Action: Enable only when debugging
+  - Examples: Step-by-step execution, intermediate values, detailed comparisons
+
+### Logging Examples
+
+```go
+// ERROR - Critical failure
+logger.Error(err, "failed to create VirtualService",
+    "domain", domain,
+    "gateway", gateway.Name,
+    "gatewayNamespace", gateway.Namespace,
+)
+
+// WARN - Warning condition (using Info level with WARNING prefix)
+logger.Info("WARNING: Gateway hosts field contains internal data, not external domains",
+    "gateway", gateway.Name,
+)
+
+// INFO - Important event
+logger.Info("Created VirtualService for HTTP01 solver",
+    "pod", pod.Name,
+    "domain", domain,
+    "gateway", gateway.Name,
+)
+
+// DEBUG - Detailed diagnostic (requires --zap-log-level=debug)
+logger.V(1).Info("Checking Gateway for domain match",
+    "domain", domain,
+    "gateway", gateway.Name,
+    "gatewayDomains", domains,
+)
+```
+
+## Istio Gateway Specific
+- **CRITICAL: Gateway.Spec.Servers[].Hosts field contains internal network data, NOT external domains**
+  - The `hosts` field in Gateway is used for internal routing configuration within the service mesh
+  - External domains for which certificates are issued are determined through VirtualService resources
+  - When determining which Gateway handles a domain, use ONLY domains from associated VirtualService resources
+  - NEVER use Gateway.Spec.Servers[].Hosts to determine which Gateway handles an external domain
+
