@@ -19,6 +19,11 @@ import (
 	istionetworkingv1beta1 "istio.io/client-go/pkg/apis/networking/v1beta1"
 )
 
+const (
+	// istioHTTP01ManagedByLabel значение метки для ресурсов, управляемых оператором istio-http01
+	istioHTTP01ManagedByLabel = "istio-http01"
+)
+
 // getVirtualServicesForGateway получает все VirtualService, связанные с Gateway
 func (r *GatewayReconciler) getVirtualServicesForGateway(ctx context.Context, gateway *istionetworkingv1beta1.Gateway) ([]*istionetworkingv1beta1.VirtualService, error) {
 	// Получение всех VirtualService во всех namespace
@@ -36,7 +41,7 @@ func (r *GatewayReconciler) getVirtualServicesForGateway(ctx context.Context, ga
 
 		// Исключаем VirtualService, созданные оператором istio-http01
 		if vsItem.Labels != nil {
-			if vsItem.Labels["app.kubernetes.io/managed-by"] == "istio-http01" ||
+			if vsItem.Labels["app.kubernetes.io/managed-by"] == istioHTTP01ManagedByLabel ||
 				vsItem.Labels["acme.cert-manager.io/http01-solver"] == http01SolverLabelValue {
 				continue
 			}

@@ -2,8 +2,8 @@ apiVersion: v2
 name: istio-http01
 description: Kubernetes operator for monitoring cert-manager HTTP01 challenge pods and Istio Gateways
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.0.1
+appVersion: "0.0.1"
 keywords:
   - kubernetes
   - operator

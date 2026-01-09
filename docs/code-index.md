@@ -50,6 +50,7 @@
 - **Поля**:
   - `Client client.Client` - Kubernetes клиент
   - `Scheme *runtime.Scheme` - runtime схема
+  - `DebugMode bool` - режим отладки (задерживает восстановление сертификата на 5 минут)
 
 #### Функции
 
@@ -74,6 +75,142 @@
   - `mgr ctrl.Manager` - менеджер контроллеров
 - **Возвращает**: 
   - `error` - ошибка настройки
+
+##### `(r *CertificateReconciler) isCertificateReady(cert) bool`
+- **Описание**: Проверяет, готов ли Certificate (выпущен ли сертификат)
+- **Параметры**: 
+  - `cert *certmanagerv1.Certificate` - Certificate ресурс
+- **Возвращает**: 
+  - `bool` - true если сертификат готов
+
+##### `(r *CertificateReconciler) findGatewaysUsingCertificate(ctx, secretName, secretNamespace) ([]*Gateway, error)`
+- **Описание**: Находит все Gateway, которые используют указанный сертификат (оригинальный или временный)
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `secretName string` - имя секрета
+  - `secretNamespace string` - namespace секрета
+- **Возвращает**: 
+  - `[]*istionetworkingv1beta1.Gateway` - список Gateway
+  - `error` - ошибка поиска
+
+##### `(r *CertificateReconciler) hasHTTPSRedirect(gateway) bool`
+- **Описание**: Проверяет, включен ли httpsRedirect в Gateway
+- **Параметры**: 
+  - `gateway *istionetworkingv1beta1.Gateway` - Gateway ресурс
+- **Возвращает**: 
+  - `bool` - true если httpsRedirect включен
+
+##### `(r *CertificateReconciler) createSelfSignedCertificate(ctx, cert, gateway) error`
+- **Описание**: Создает самоподписанный сертификат для Gateway когда основной не готов
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `cert *certmanagerv1.Certificate` - оригинальный Certificate
+  - `gateway *istionetworkingv1beta1.Gateway` - Gateway ресурс
+- **Возвращает**: 
+  - `error` - ошибка создания
+
+##### `(r *CertificateReconciler) updateGatewayWithTemporarySecret(ctx, gateway, cert, originalSecretName, tempSecretName, secretNamespace) error`
+- **Описание**: Обновляет Gateway для использования временного секрета и отключает HSTS
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `gateway *istionetworkingv1beta1.Gateway` - Gateway ресурс
+  - `cert *certmanagerv1.Certificate` - Certificate ресурс
+  - `originalSecretName string` - имя оригинального секрета
+  - `tempSecretName string` - имя временного секрета
+  - `secretNamespace string` - namespace секретов
+- **Возвращает**: 
+  - `error` - ошибка обновления
+
+##### `(r *CertificateReconciler) restoreGatewayOriginalSecret(ctx, gateway, originalSecretName, secretNamespace) error`
+- **Описание**: Восстанавливает оригинальный секрет в Gateway и включает обратно HSTS
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `gateway *istionetworkingv1beta1.Gateway` - Gateway ресурс
+  - `originalSecretName string` - имя оригинального секрета
+  - `secretNamespace string` - namespace секрета
+- **Возвращает**: 
+  - `error` - ошибка восстановления
+
+##### `(r *CertificateReconciler) deleteTemporarySelfSignedCertificate(ctx, cert) error`
+- **Описание**: Удаляет временный самоподписанный сертификат и issuer
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `cert *certmanagerv1.Certificate` - оригинальный Certificate
+- **Возвращает**: 
+  - `error` - ошибка удаления
+
+##### `(r *CertificateReconciler) createEnvoyFilterToDisableHSTS(ctx, gateway, originalSecretName) error`
+- **Описание**: Создает EnvoyFilter для отключения HSTS заголовка
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `gateway *istionetworkingv1beta1.Gateway` - Gateway ресурс
+  - `originalSecretName string` - имя оригинального секрета
+- **Возвращает**: 
+  - `error` - ошибка создания
+
+##### `(r *CertificateReconciler) deleteEnvoyFilterForHSTS(ctx, gateway, originalSecretName) error`
+- **Описание**: Удаляет EnvoyFilter для отключения HSTS
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `gateway *istionetworkingv1beta1.Gateway` - Gateway ресурс
+  - `originalSecretName string` - имя оригинального секрета
+- **Возвращает**: 
+  - `error` - ошибка удаления
+
+##### `(r *CertificateReconciler) ensureTemporaryCertificateSetup(ctx, cert, gateway) error`
+- **Описание**: Проверяет и восстанавливает состояние временного сертификата, httpRedirect и EnvoyFilter
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `cert *certmanagerv1.Certificate` - Certificate ресурс
+  - `gateway *istionetworkingv1beta1.Gateway` - Gateway ресурс
+- **Возвращает**: 
+  - `error` - ошибка проверки/восстановления
+
+##### `(r *CertificateReconciler) getDomainsForGateway(ctx, gateway) ([]string, error)`
+- **Описание**: Получает список доменов для Gateway из связанных VirtualService
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `gateway *istionetworkingv1beta1.Gateway` - Gateway ресурс
+- **Возвращает**: 
+  - `[]string` - список доменов
+  - `error` - ошибка получения
+
+##### `(r *CertificateReconciler) getIngressGatewayIP(ctx, gateway) (string, error)`
+- **Описание**: Получает IP адрес ingress gateway для Gateway
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `gateway *istionetworkingv1beta1.Gateway` - Gateway ресурс
+- **Возвращает**: 
+  - `string` - IP адрес
+  - `error` - ошибка получения
+
+##### `(r *CertificateReconciler) verifyCertificateViaHTTPS(ctx, gateway, expectedDNSNames, ingressIP) error`
+- **Описание**: Проверяет сертификат через HTTPS запрос и сравнивает домены
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `gateway *istionetworkingv1beta1.Gateway` - Gateway ресурс
+  - `expectedDNSNames []string` - ожидаемые DNS имена
+  - `ingressIP string` - IP адрес ingress gateway
+- **Возвращает**: 
+  - `error` - ошибка проверки
+
+##### `(r *CertificateReconciler) verifyCertificateViaHTTP(ctx, gateway, ingressIP) error`
+- **Описание**: Проверяет доступность через HTTP запрос
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `gateway *istionetworkingv1beta1.Gateway` - Gateway ресурс
+  - `ingressIP string` - IP адрес ingress gateway
+- **Возвращает**: 
+  - `error` - ошибка проверки
+
+##### `(r *CertificateReconciler) findCertificateBySecretName(ctx, secretName, secretNamespace) *Certificate`
+- **Описание**: Находит Certificate по имени секрета
+- **Параметры**: 
+  - `ctx context.Context` - контекст
+  - `secretName string` - имя секрета
+  - `secretNamespace string` - namespace секрета
+- **Возвращает**: 
+  - `*certmanagerv1.Certificate` - найденный Certificate или nil
 
 ### http01_solver_pod_controller.go
 
@@ -505,5 +642,5 @@
 
 ---
 
-**Последнее обновление**: 2026-01-06
+**Последнее обновление**: 2026-01-10
 

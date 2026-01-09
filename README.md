@@ -49,6 +49,9 @@ helm install istio-http01 \
   --create-namespace \
   --set image.repository=rieset/istio-http01 \
   --set image.tag=<version>
+
+# Опционально: включить debug режим для тестирования временных сертификатов
+# --set debug=true
 ```
 
 **Примечание:** Версия Docker образа (`image.tag`) должна совпадать с версией Helm чарта (`--version`). Это гарантирует, что будет использован правильный образ для данной версии оператора.
@@ -64,6 +67,9 @@ helm upgrade istio-http01 \
   -n istio-system \
   --set image.repository=rieset/istio-http01 \
   --set image.tag=<version>
+
+# Опционально: включить debug режим для тестирования временных сертификатов
+# --set debug=true
 ```
 
 **Просмотр информации о chart:**
@@ -163,6 +169,10 @@ make build-push-deploy VERSION=0.1.0 IMG=rieset/istio-http01:0.1.0
    - Связан с найденным Gateway
 
 5. **Автоматическая очистка**: Оператор периодически проверяет и удаляет VirtualService, которые ссылаются на несуществующие поды или сервисы
+
+6. **Временные самоподписанные сертификаты**: Если основной сертификат не готов и Gateway имеет `httpsRedirect: true`, оператор автоматически создает временный самоподписанный сертификат для обеспечения работы сайта
+
+7. **Управление HSTS**: Для временных сертификатов оператор создает EnvoyFilter, который отключает HSTS (HTTP Strict Transport Security), предотвращая проблемы с браузерами
 
 ### Пример конфигурации
 
@@ -338,6 +348,150 @@ hosts:
 - **VirtualService создаются в namespace Gateway**, что позволяет изолировать конфигурацию по namespace
 - **Оператор автоматически очищает устаревшие VirtualService** после успешной валидации домена
 - **Поддержка cross-namespace**: Оператор корректно работает, когда Gateway и поды находятся в разных namespace
+- **Временные сертификаты**: Оператор автоматически создает временные самоподписанные сертификаты для Gateway с `httpsRedirect: true`, когда основной сертификат не готов
+- **Автоматическое управление HSTS**: Оператор отключает HSTS для временных сертификатов через EnvoyFilter и включает обратно после получения валидного сертификата
+
+## Временные сертификаты и управление HSTS
+
+### Обзор
+
+Оператор автоматически управляет временными самоподписанными сертификатами для Gateway, у которых включен `httpsRedirect: true`, но основной сертификат еще не готов. Это позволяет сайту работать даже до получения валидного сертификата от Let's Encrypt.
+
+### Как это работает
+
+1. **Обнаружение неготового сертификата**: Оператор отслеживает Certificate ресурсы и определяет, когда сертификат не готов (статус `Ready: False`)
+
+2. **Проверка Gateway**: Если сертификат используется в Gateway с включенным `httpsRedirect: true`, оператор:
+   - Создает временный самоподписанный Issuer
+   - Создает временный Certificate с теми же DNS именами, что и оригинальный сертификат, плюс все домены из связанных VirtualService
+   - Обновляет Gateway для использования временного секрета
+   - Отключает `httpsRedirect` на HTTP сервере (порт 80) для прохождения HTTP01 challenge
+   - Создает EnvoyFilter для отключения HSTS заголовка
+
+3. **Восстановление после готовности**: Когда основной сертификат становится готовым:
+   - Оператор восстанавливает оригинальный секрет в Gateway
+   - Включает обратно `httpsRedirect` на HTTP сервере
+   - Удаляет EnvoyFilter (HSTS включается обратно)
+   - Удаляет временный сертификат и Issuer
+
+### DNS имена во временном сертификате
+
+Временный сертификат создается с объединением:
+- Всех DNS имен из оригинального Certificate (`spec.dnsNames`)
+- Всех доменов Gateway из связанных VirtualService
+
+Это гарантирует, что временный сертификат покрывает все домены, которые обслуживает Gateway, даже если они не указаны в оригинальном Certificate.
+
+### EnvoyFilter для отключения HSTS
+
+Для предотвращения проблем с браузерами (например, Chrome блокирует доступ при самоподписанных сертификатах с HSTS), оператор создает EnvoyFilter с Lua фильтром, который удаляет заголовок `Strict-Transport-Security` из HTTP ответов.
+
+EnvoyFilter:
+- Создается в namespace Gateway
+- Использует селектор из Gateway (`spec.selector`) для правильного выбора workload
+- Применяется только к GATEWAY контексту
+- Автоматически удаляется после восстановления оригинального сертификата
+
+### Debug режим
+
+Для тестирования временных сертификатов доступен debug режим, который задерживает восстановление оригинального сертификата на 5 минут после его готовности.
+
+**Включение debug режима:**
+
+```yaml
+# В values.yaml или через --set
+debug: true
+```
+
+Или при установке через Helm:
+
+```bash
+helm install istio-http01 \
+  oci://ghcr.io/rieset/helm-charts/istio-http01 \
+  --version <version> \
+  -n istio-system \
+  --create-namespace \
+  --set debug=true
+```
+
+**Как работает debug режим:**
+
+- Когда основной сертификат становится готовым, оператор проверяет время создания временного сертификата
+- Если прошло менее 5 минут, восстановление откладывается
+- В логах оператора отображается оставшееся время до восстановления
+- После истечения 5 минут оператор автоматически восстанавливает оригинальный сертификат
+
+Это позволяет проверить работу временного сертификата, EnvoyFilter и отключение HSTS без необходимости ждать готовности основного сертификата.
+
+### Примеры ресурсов
+
+**Временный Certificate:**
+```yaml
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: gateway-cert-beta8-temp-selfsigned
+  namespace: istio-system
+  labels:
+    app.kubernetes.io/managed-by: istio-http01
+    istio-http01.rieset.io/temp: "true"
+    istio-http01.rieset.io/original-cert: gateway-cert-beta8
+spec:
+  secretName: gateway-cert-secret-beta8-temp
+  dnsNames:
+    - beta8.b2c.pr0d.h3llo.dev
+    - app.beta8.b2c.pr0d.h3llo.dev
+  issuerRef:
+    name: gateway-cert-beta8-temp-selfsigned-issuer
+    kind: Issuer
+    group: cert-manager.io
+```
+
+**EnvoyFilter для отключения HSTS:**
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: disable-hsts-h3gateway-beta8-h3gateway
+  namespace: h3gateway-beta8
+  labels:
+    app.kubernetes.io/managed-by: istio-http01
+    istio-http01.rieset.io/temp: "true"
+    istio-http01.rieset.io/original-cert: gateway-cert-secret-beta8
+spec:
+  workloadSelector:
+    labels:
+      istio: h3-cluster-istio  # Селектор из Gateway
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: GATEWAY
+      proxy:
+        proxyVersion: ".*"
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.filters.http.lua
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+          inline_code: |
+            function envoy_on_response(response_handle)
+              response_handle:headers():remove("strict-transport-security")
+            end
+```
+
+### Аннотации Gateway
+
+Оператор добавляет следующие аннотации к Gateway при использовании временного сертификата:
+
+- `istio-http01.rieset.io/original-credential-name-<secretName>`: Хранит оригинальное имя секрета для восстановления
+- `istio-http01.rieset.io/original-https-redirect-<secretName>`: Хранит оригинальное значение `httpsRedirect` для восстановления
+
+Эти аннотации автоматически удаляются при восстановлении оригинального сертификата.
 
 ## Технологии
 
@@ -391,6 +545,8 @@ brew install operator-sdk
 - [Индекс функций кода](docs/code-index.md) - полный индекс всех функций проекта
 - [Руководство по созданию Go оператора с Operator SDK](docs/operator-sdk-go-guide.md) - пошаговое руководство
 - [Отслеживание HTTP01 Solver Pods](docs/http01-solver-tracking.md) - как оператор отслеживает поды и проверяет VirtualService
+- [Временные сертификаты и управление HSTS](docs/temporary-certificates.md) - механизм автоматического создания временных сертификатов
+- [Временные аспекты HSTS и EnvoyFilter](docs/hsts-timing.md) - когда создается EnvoyFilter и как предотвращается кеширование HSTS
 - [Логирование](docs/logging.md) - система логирования с цветной подсветкой
 - [Глоссарий терминов](docs/glossary.md)
 - [Best Practices для Go](docs/best-practices.md)

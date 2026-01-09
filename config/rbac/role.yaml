@@ -26,10 +26,12 @@ rules:
   - cert-manager.io
   resources:
   - certificates
-  - issuers
   verbs:
+  - create
+  - delete
   - get
   - list
+  - update
   - watch
 - apiGroups:
   - cert-manager.io
@@ -39,12 +41,61 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - cert-manager.io
+  resources:
+  - issuers
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
+  - example.io
+  resources:
+  - examples
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - example.io
+  resources:
+  - examples/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - example.io
+  resources:
+  - examples/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - networking.istio.io
+  resources:
+  - envoyfilters
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
   - networking.istio.io
   resources:
   - gateways
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - networking.istio.io

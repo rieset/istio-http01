@@ -34,6 +34,7 @@ type GatewayReconciler struct {
 // +kubebuilder:rbac:groups=networking.istio.io,resources=gateways,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.istio.io,resources=virtualservices,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;patch;update
+// +kubebuilder:rbac:groups=cert-manager.io,resources=certificates,verbs=get;list;watch
 
 // Reconcile обрабатывает Istio Gateway ресурсы
 func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {

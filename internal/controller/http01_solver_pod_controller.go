@@ -224,16 +224,4 @@ func (r *HTTP01SolverPodReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// extractDomainFromPod извлекает домен из аргументов контейнера acmesolver
-func (r *HTTP01SolverPodReconciler) extractDomainFromPod(pod *corev1.Pod) string {
-	for _, container := range pod.Spec.Containers {
-		if container.Name == "acmesolver" {
-			for _, arg := range container.Args {
-				if strings.HasPrefix(arg, "--domain=") {
-					return strings.TrimPrefix(arg, "--domain=")
-				}
-			}
-		}
-	}
-	return ""
-}
+// extractDomainFromPod перенесена в http01_solver_pod_extract.go

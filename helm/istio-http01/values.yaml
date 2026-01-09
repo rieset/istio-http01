@@ -4,7 +4,7 @@ replicaCount: 1
 image:
   repository: rieset/istio-http01
   pullPolicy: Always
-  tag: "0.1.0"
+  tag: "0.0.1"
 
 imagePullSecrets: []
 nameOverride: ""
@@ -60,4 +60,7 @@ metrics:
 # Watch namespace - empty means watch all namespaces for Gateway
 # For Certificate, Issuer and Pods - always watches own namespace
 watchNamespace: ""
+
+# Debug mode - if true, delays certificate restoration by 5 minutes to test temporary certificates
+debug: false
 
